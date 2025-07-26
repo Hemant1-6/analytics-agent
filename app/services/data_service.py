@@ -27,10 +27,14 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> Any:
 def serialize_result(result: Any) -> Any:
     """Formats analysis result into a JSON-serializable structure."""
     if isinstance(result, pd.DataFrame):
-        # FIX: Ensure that if the result has an index, it's converted to a column.
-        # This prevents the index (e.g., 'category') from being lost during serialization.
-        if result.index.name is not None and result.index.name not in result.columns:
+        # FIX: Robustly handle both row and column MultiIndexes to prevent tuple key errors.
+        if isinstance(result.index, pd.MultiIndex):
             result = result.reset_index()
+        
+        if isinstance(result.columns, pd.MultiIndex):
+            # Flatten the column headers by joining the tuple elements with an underscore
+            result.columns = ['_'.join(map(str, col)).strip() for col in result.columns.values]
+            
         return result.to_dict(orient="records")
     
     elif isinstance(result, pd.Series):

@@ -60,19 +60,20 @@ async def analyze_data(request: QueryRequest, df: pd.DataFrame = Depends(get_dat
         
         pandas_code = llm_response.get("pandas_code")
         widget_type = llm_response.get("widget_typeofchart")
+        widget_title = llm_response.get("widget_title")
 
-        if not pandas_code or not widget_type:
-            raise ValueError("LLM failed to generate the required code and widget type.")
+        if not all([pandas_code, widget_type, widget_title]):
+            raise ValueError("LLM failed to generate all required fields: code, widget type, and title.")
 
         raw_result = await run_in_threadpool(data_service.execute_pandas_code, df, pandas_code)
         
         formatted_data = data_service.serialize_result(raw_result)
         
-        final_widget_json = format_data_into_widget(widget_type, formatted_data, request.query)
+        final_widget_json = format_data_into_widget(widget_type, formatted_data, widget_title)
 
         summary_sample_data = json.dumps(formatted_data[:20])
         summary_suggestions_response = await run_in_threadpool(
-            llm_service.generate_summary_and_suggestions, request.query, summary_sample_data
+            llm_service.generate_summary_and_suggestions, request.query, summary_sample_data, df_info_str
         )
         
         description = summary_suggestions_response.get("summary")
