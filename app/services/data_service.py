@@ -27,7 +27,7 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> Any:
 def serialize_result(result: Any) -> Any:
     """Formats analysis result into a JSON-serializable structure."""
     if isinstance(result, pd.DataFrame):
-        # FIX: Robustly handle both row and column MultiIndexes to prevent tuple key errors.
+        # Robustly handle both row and column MultiIndexes to prevent tuple key errors.
         if isinstance(result.index, pd.MultiIndex):
             result = result.reset_index()
         

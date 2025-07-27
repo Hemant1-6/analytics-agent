@@ -11,25 +11,13 @@ from app.utils.widget_formatter import format_data_into_widget
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
-# --- Dependency ---
-async def get_dataframe(dataset_id: str) -> pd.DataFrame:
-    """Dependency to get a DataFrame from cache. Raises 404 if not found."""
-    df = DATASET_CACHE.get(dataset_id)
-    if df is None:
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found. Please upload it first.")
-    return df
-
-
 @router.post("/upload", status_code=201)
 async def upload_dataset(file: UploadFile = File(...)):
-    """Upload a CSV dataset for analysis."""
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Invalid file type. Please upload a CSV.")
     
     try:
-        with file.file as f:
-            df = pd.read_csv(f)
-        
+        df = pd.read_csv(file.file)
         df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_').str.replace('[^a-zA-Z0-9_]', '', regex=True)
         
         dataset_id = file.filename
@@ -39,8 +27,11 @@ async def upload_dataset(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Error processing CSV: {e}")
 
 @router.get("/dataset/{dataset_id}", response_model=DatasetInfo)
-async def get_dataset_info(dataset_id: str, df: pd.DataFrame = Depends(get_dataframe)):
-    """Get basic information about a loaded dataset."""
+async def get_dataset_info(dataset_id: str):
+    df = DATASET_CACHE.get(dataset_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found. Please upload it first.")
+    
     return {
         "file_name": dataset_id,
         "columns": df.columns.tolist(),
@@ -49,8 +40,17 @@ async def get_dataset_info(dataset_id: str, df: pd.DataFrame = Depends(get_dataf
     }
 
 @router.post("/analyze", response_model=AnalyticsResponse)
-async def analyze_data(request: QueryRequest, df: pd.DataFrame = Depends(get_dataframe)):
-    """Analyze data based on a user query."""
+async def analyze_data(request: QueryRequest):
+    """
+    Analyzes data based on a user query. The request body should be a JSON object
+    containing 'dataset_id' and 'query'.
+    """
+    # FIX: Manually retrieve the DataFrame from the cache using the dataset_id from the request body.
+    # This resolves the 422 error caused by conflicting request parsing.
+    df = DATASET_CACHE.get(request.dataset_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_id}' not found. Please upload it first.")
+
     try:
         df_info_str = await run_in_threadpool(data_service.get_dataframe_info, df)
         

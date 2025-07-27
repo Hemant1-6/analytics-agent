@@ -24,6 +24,7 @@ class DatasetInfo(BaseModel):
 class CodeChartResponse(BaseModel):
     pandas_code: str = Field(description="The pandas code to execute.")
     widget_typeofchart: str = Field(description="The type of widget to display.")
+    widget_title: str = Field(description="A concise, descriptive title for the chart or table.")
 
 class SummarySuggestionsResponse(BaseModel):
     summary: str = Field(description="A summary of the data insights.")

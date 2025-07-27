@@ -69,3 +69,7 @@ venv.bak/
 
 # Miscellaneous
 .DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/build/

@@ -63,3 +63,4 @@ asteval
 cachetools
 python-multipart
 langchain-google-genai
+aiofiles

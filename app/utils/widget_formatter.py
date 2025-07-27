@@ -13,7 +13,6 @@ def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title:
     }
 
     if widget_type == "TBL" or widget_type == "LDRBRD":
-        # FIX: Add ranking for leaderboards
         if widget_type == "LDRBRD":
             for i, record in enumerate(data):
                 record['rank'] = f"#{i + 1}"
@@ -21,7 +20,6 @@ def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title:
         first_record = data[0]
         columns = [{"label": str(key).replace('_', ' ').title(), "key": str(key)} for key in first_record.keys()]
         
-        # Ensure 'Rank' column is first for leaderboards
         if widget_type == "LDRBRD":
             rank_col = next((c for c in columns if c['key'] == 'rank'), None)
             if rank_col:
