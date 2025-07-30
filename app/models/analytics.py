@@ -20,10 +20,10 @@ class DatasetInfo(BaseModel):
     shape: List[int]
     sample_data: List[Dict[str, Any]]
 
-# Pydantic models for LangChain's JSON output parser
-class CodeChartResponse(BaseModel):
+class CodeResponse(BaseModel):
     pandas_code: str = Field(description="The pandas code to execute.")
-    widget_typeofchart: str = Field(description="The type of widget to display.")
+
+class TitleResponse(BaseModel):
     widget_title: str = Field(description="A concise, descriptive title for the chart or table.")
 
 class SummarySuggestionsResponse(BaseModel):

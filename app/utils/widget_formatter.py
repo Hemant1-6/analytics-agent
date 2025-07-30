@@ -1,9 +1,37 @@
 from typing import Dict, Any, List
+import pandas as pd
+
+def determine_widget_type(result: pd.DataFrame, query: str) -> str:
+    """
+    Analyzes the result DataFrame and query to determine the best widget type.
+    """
+    if not isinstance(result, pd.DataFrame):
+        return "CARD"
+
+    rows, cols = result.shape
+
+    if rows == 1 and cols == 1:
+        return "CARD"
+
+    pie_keywords = ["breakdown", "share", "composition", "proportions"]
+    if any(keyword in query.lower() for keyword in pie_keywords) and cols == 2:
+        return "PIE"
+
+    if "top" in query.lower() or "bottom" in query.lower():
+        return "LDRBRD"
+        
+    if "distribution" in query.lower():
+        return "TBL"
+
+    if cols == 2:
+        return "VBC"
+    if cols == 3:
+        return "VDBC"
+
+    return "TBL"
+
 
 def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title: str) -> Dict[str, Any]:
-    """
-    Builds the complete widget JSON using the actual data.
-    """
     if not data:
         return {"error": "No data to format."}
 
@@ -13,7 +41,7 @@ def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title:
     }
 
     if widget_type == "TBL" or widget_type == "LDRBRD":
-        if widget_type == "LDRBRD":
+        if widget_type == "LDRBRD" and data:
             for i, record in enumerate(data):
                 record['rank'] = f"#{i + 1}"
 

@@ -7,7 +7,7 @@ from typing import Dict, Any
 from app.models.analytics import QueryRequest, AnalyticsResponse, DatasetInfo
 from app.services import llm_service, data_service
 from app.core.cache import DATASET_CACHE
-from app.utils.widget_formatter import format_data_into_widget
+from app.utils.widget_formatter import format_data_into_widget, determine_widget_type
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
@@ -41,12 +41,6 @@ async def get_dataset_info(dataset_id: str):
 
 @router.post("/analyze", response_model=AnalyticsResponse)
 async def analyze_data(request: QueryRequest):
-    """
-    Analyzes data based on a user query. The request body should be a JSON object
-    containing 'dataset_id' and 'query'.
-    """
-    # FIX: Manually retrieve the DataFrame from the cache using the dataset_id from the request body.
-    # This resolves the 422 error caused by conflicting request parsing.
     df = DATASET_CACHE.get(request.dataset_id)
     if df is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_id}' not found. Please upload it first.")
@@ -54,23 +48,29 @@ async def analyze_data(request: QueryRequest):
     try:
         df_info_str = await run_in_threadpool(data_service.get_dataframe_info, df)
         
-        llm_response = await run_in_threadpool(
-            llm_service.generate_code_and_chart_type, request.query, df_info_str
+        # Step 1: LLM generates only the pandas code
+        code_response = await run_in_threadpool(
+            llm_service.generate_code, request.query, df_info_str
         )
-        
-        pandas_code = llm_response.get("pandas_code")
-        widget_type = llm_response.get("widget_typeofchart")
-        widget_title = llm_response.get("widget_title")
+        pandas_code = code_response.get("pandas_code")
+        if not pandas_code:
+            raise ValueError("LLM failed to generate pandas code.")
 
-        if not all([pandas_code, widget_type, widget_title]):
-            raise ValueError("LLM failed to generate all required fields: code, widget type, and title.")
-
+        # Step 2: Execute the code to get the real data result
         raw_result = await run_in_threadpool(data_service.execute_pandas_code, df, pandas_code)
         
-        formatted_data = data_service.serialize_result(raw_result)
+        # Step 3: Python logic determines the best widget type from the actual result
+        widget_type = determine_widget_type(raw_result, request.query)
         
+        # Step 4: A separate, simple LLM call generates a clean title
+        title_response = await run_in_threadpool(llm_service.generate_title, request.query)
+        widget_title = title_response.get("widget_title", "Data Analysis")
+
+        # Step 5: Serialize the result and format the final widget JSON
+        formatted_data = data_service.serialize_result(raw_result)
         final_widget_json = format_data_into_widget(widget_type, formatted_data, widget_title)
 
+        # Step 6: Generate summary and suggestions
         summary_sample_data = json.dumps(formatted_data[:20])
         summary_suggestions_response = await run_in_threadpool(
             llm_service.generate_summary_and_suggestions, request.query, summary_sample_data, df_info_str

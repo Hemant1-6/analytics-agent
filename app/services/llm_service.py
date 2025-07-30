@@ -1,21 +1,22 @@
 import logging
 from typing import Dict, Any
 from app.core.config import settings
-from app.models.analytics import CodeChartResponse, SummarySuggestionsResponse
+from app.models.analytics import CodeResponse, TitleResponse, SummarySuggestionsResponse
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 logger = logging.getLogger(__name__)
 
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=settings.GEMINI_API_KEY)
+# Initialize the OpenAI model via LangChain
+llm = ChatOpenAI(model="gpt-4-turbo", openai_api_key=settings.OPENAI_API_KEY)
 
-def generate_code_and_chart_type(query: str, df_info: str) -> Dict[str, Any]:
-    parser = JsonOutputParser(pydantic_object=CodeChartResponse)
+def generate_code(query: str, df_info: str) -> Dict[str, Any]:
+    parser = JsonOutputParser(pydantic_object=CodeResponse)
     prompt = PromptTemplate(
         template="""
-You are an expert data analyst AI. Your task is to interpret a user's query and provide the tools to answer it by following a strict process.
+You are an expert data analyst AI. Your task is to interpret a user's query and generate the correct Python pandas code to answer it.
 
 **DataFrame Info:**
 {df_info}
@@ -24,35 +25,13 @@ You are an expert data analyst AI. Your task is to interpret a user's query and 
 "{query}"
 
 **Instructions:**
-
-**Step 1: Deconstruct the Query**
-- Identify the metric(s) the user wants to measure (e.g., 'sales', 'profit', 'quantity', 'correlation', 'average profit per order').
-- Identify the category or dimension(s) for grouping (e.g., 'region', 'segment', 'customer_name').
-- Count the number of metrics and the number of grouping dimensions.
-- Note if the query involves a multi-step process, like finding a "top N" list and then performing another calculation on it.
-
-**Step 2: Select a `widget_typeofchart`**
-Based on your analysis in Step 1, choose the most appropriate `widget_typeofchart` from the list below. This is a critical step.
-- **`CARD`**: Use for a single metric with NO grouping dimensions (e.g., "total sales").
-- **`PIE`**: Use for a single metric and a single grouping dimension, ONLY if the query contains keywords like "breakdown", "share", "composition", or "proportions".
-- **`VBC`**: Use for a single metric and a single grouping dimension (e.g., "sales by region").
-- **`VDBC`**: Use for TWO metrics and a single grouping dimension (e.g., "sales and profit by category").
-- **`LDRBRD`**: Use for ranked lists (e.g., "top 10...").
-- **`TBL`**: Use for TWO OR MORE grouping dimensions (e.g., "sales by region and category") or for complex analyses like correlation  or multi-step calculations.
-
-**Step 3: Generate a `widget_title`**
-- Create a short, descriptive title for the widget based on the query.
-
-**Step 4: Generate `pandas_code`**
-- Write the Python pandas code that correctly calculates the metrics and groupings identified in Step 1.
-- For multi-step queries like "average profit per order for top 10 customers", first find the top customers, filter the DataFrame, and then perform the final calculation.
+- Your primary goal is to write the pandas code that correctly performs the analysis.
+- For complex calculations like 'profit margin', the formula is `(profit / sales) * 100`. You must perform the aggregation first, then define the new column.
+- For "distribution" queries, you should count the occurrences of each value. A good approach is `df.groupby(['dimension_column'])['metric_column'].value_counts().reset_index(name='count')`.
 - The final result **MUST** be stored in a variable named `result`.
-- **CRITICAL**: If you use `groupby`, you **MUST** chain `.reset_index()` at the end. For example: `result = df.groupby('category')['sales'].sum().reset_index()`
+- **CRITICAL**: If you use `groupby`, you **MUST** chain `.reset_index()` at the end.
 - The `result` should be a DataFrame.
 - Do NOT include `import pandas as pd`.
-
-**Step 5: Final Output**
-Return a single, valid JSON object with the `pandas_code`, `widget_typeofchart`, and `widget_title` you determined in the steps above.
 
 {format_instructions}
 """,
@@ -64,7 +43,28 @@ Return a single, valid JSON object with the `pandas_code`, `widget_typeofchart`,
         return chain.invoke({"query": query, "df_info": df_info})
     except Exception as e:
         logger.error(f"LangChain invocation failed for code generation: {e}")
-        raise ValueError("Failed to generate analysis from LangChain.")
+        raise ValueError("Failed to generate pandas code from LangChain.")
+
+def generate_title(query: str) -> Dict[str, Any]:
+    parser = JsonOutputParser(pydantic_object=TitleResponse)
+    prompt = PromptTemplate(
+        template="""
+Based on the user's query, create a short, descriptive title for a chart or table. For example, if the query is "What are the total sales for each customer segment?", a good title would be "Total Sales by Customer Segment".
+
+**User Query:**
+"{query}"
+
+{format_instructions}
+""",
+        input_variables=["query"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    )
+    chain = prompt | llm | parser
+    try:
+        return chain.invoke({"query": query})
+    except Exception as e:
+        logger.error(f"LangChain invocation failed for title generation: {e}")
+        return {"widget_title": "Data Analysis"} # Fallback title
 
 def generate_summary_and_suggestions(query: str, data: str, df_info: str) -> Dict[str, Any]:
     parser = JsonOutputParser(pydantic_object=SummarySuggestionsResponse)
