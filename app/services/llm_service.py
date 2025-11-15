@@ -32,6 +32,13 @@ You are an expert data analyst AI. Your task is to interpret a user's query and 
 - **CRITICAL**: If you use `groupby`, you **MUST** chain `.reset_index()` at the end.
 - The `result` should be a DataFrame.
 - Do NOT include `import pandas as pd`.
+- Consider Bizline name as Product / Business Line / Loan Type.
+- Consider Payee name as (DSA / Channel Partner / Vendor) Name, also different vendors can have same name . 
+- Consider payee code as (DSA / Channel Partner / Vendor) Code
+- Consider ACCT_NUMBER as loan account id 
+- Consider NET_DISB_AMT as disbusement value / disb amt/ disbursed amount
+- Consider INSURANCE_FEE as insurance amount / insurance fee / cross sell amount
+- Consider Payout Amount as payout amount / commission amount / dsa payout
 
 {format_instructions}
 """,
