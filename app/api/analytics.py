@@ -3,11 +3,14 @@ from fastapi.concurrency import run_in_threadpool
 import pandas as pd
 import json
 from typing import Dict, Any
-
+from pydantic import BaseModel
+import ast
+import traceback
 from app.models.analytics import QueryRequest, AnalyticsResponse, DatasetInfo
 from app.services import llm_service, data_service
 from app.core.cache import DATASET_CACHE
 from app.utils.widget_formatter import format_data_into_widget, determine_widget_type
+from asteval import Interpreter
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
@@ -94,3 +97,84 @@ async def analyze_data(request: QueryRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
+
+# -----------------------
+# Diagnostic Helper
+# -----------------------
+def exec_code_with_debug(code_str: str, df: pd.DataFrame):
+    """Syntax-check and execute generated pandas code with detailed diagnostics."""
+    # 1) Syntax check
+    try:
+        ast.parse(code_str)
+    except SyntaxError as se:
+        return {
+            "success": False,
+            "error_type": "SyntaxError",
+            "message": str(se),
+            "syntax_info": {
+                "lineno": se.lineno,
+                "offset": se.offset,
+                "text": se.text.strip() if se.text else None,
+            },
+        }
+
+    ns = {"df": df, "pd": pd}
+
+    # 2) Runtime execution
+    try:
+        exec(code_str, ns)
+    except Exception as e:
+        return {
+            "success": False,
+            "error_type": type(e).__name__,
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+            "namespace_summary": {k: type(v).__name__ for k, v in ns.items() if k != "__builtins__"},
+        }
+
+    # 3) Success — inspect result
+    result_exists = "result" in ns
+    result_preview = None
+
+    if result_exists:
+        res = ns["result"]
+        if hasattr(res, "head"):
+            try:
+                result_preview = res.head(5).to_dict(orient="records")
+            except:
+                result_preview = repr(res)
+        else:
+            result_preview = repr(res)
+
+    return {
+        "success": True,
+        "result_exists": result_exists,
+        "result_preview": result_preview,
+        "namespace_summary": {k: type(v).__name__ for k, v in ns.items() if k != "__builtins__"},
+    }
+
+
+# -----------------------
+# Request Model
+# -----------------------
+class CodeInput(BaseModel):
+    code: str
+
+
+# -----------------------
+# Diagnostic Route
+# -----------------------
+@router.post("/diagnose/{dataset_id}")
+async def diagnose_generated_code(dataset_id: str, body: CodeInput):
+    """
+    Execute generated pandas code safely and return detailed diagnostics.
+    """
+    df = DATASET_CACHE.get(dataset_id)
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset '{dataset_id}' not found. Please upload it first."
+        )
+
+    diagnostics = exec_code_with_debug(body.code, df)
+    return diagnostics
