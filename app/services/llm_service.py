@@ -10,7 +10,19 @@ from langchain_core.output_parsers import JsonOutputParser
 logger = logging.getLogger(__name__)
 
 # Initialize the OpenAI model via LangChain
-llm = ChatOpenAI(model="gpt-4-turbo", openai_api_key=settings.OPENAI_API_KEY)
+llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=settings.OPENAI_API_KEY)
+
+# --- Initialize Local LLM via Ollama's OpenAI-Compatible API ---
+# llm = ChatOpenAI(
+#     # The name of the model you pulled locally
+#     model="qwen3:8b", 
+    
+#     # Point the base URL to your local Ollama server
+#     base_url="http://localhost:11434/v1",
+    
+#     # API key is required but can be a placeholder string for local service
+#     api_key="ollama" 
+# )
 
 def generate_code(query: str, df_info: str) -> Dict[str, Any]:
     parser = JsonOutputParser(pydantic_object=CodeResponse)
