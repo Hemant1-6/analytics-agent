@@ -23,7 +23,7 @@ def execute_pandas_code(df: pd.DataFrame, code: str) -> Any:
             raise ValueError("Code did not produce a 'result' variable.")
         return result
     except Exception as e:
-        logger.error(f"Code execution failed: {e}\nCode: {code}")
+        # logger.error(f"Code execution failed: {e}\nCode: {code}")
         logger.error(exec_code_with_debug(code, df))
         raise ValueError(f"Code execution failed: {e}\nCode: {code}")
         

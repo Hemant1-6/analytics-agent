@@ -3,35 +3,31 @@ import pandas as pd
 
 def determine_widget_type(result: pd.DataFrame, query: str) -> str:
     """
-    Analyzes the result DataFrame and query to determine the best widget type.
+    Analyzes the result DataFrame to determine the best widget type,
+    currently prioritizing 'TBL' (Table) and 'CARD' formats.
     """
+    # Safety check: if input is not a DataFrame, return CARD (or TBL, depending on what the non-DataFrame input is)
+    # Based on the usage in analyze_data, result should be the execution report dict, 
+    # but the function signature expects pd.DataFrame. Assuming the caller handles extraction/conversion.
     if not isinstance(result, pd.DataFrame):
-        return "CARD"
+        # We'll assume TBL for generic non-DataFrame output to avoid errors.
+        # Note: If your analyze_data function passes the result DICT here, 
+        # this check will always fail, and you need to adapt the caller.
+        return "TBL" 
 
     rows, cols = result.shape
 
+    # 1. CARD Case (Single metric/scalar output)
     if rows == 1 and cols == 1:
         return "CARD"
 
-    pie_keywords = ["breakdown", "share", "composition", "proportions"]
-    if any(keyword in query.lower() for keyword in pie_keywords) and cols == 2:
-        return "PIE"
-
-    if "top" in query.lower() or "bottom" in query.lower():
-        return "LDRBRD"
-        
-    if "distribution" in query.lower():
-        return "TBL"
-
-    if cols == 2:
-        return "VBC"
-    if cols == 3:
-        return "VDBC"
-
+    # 2. DEFAULT Case (All other formats are returned as a standard Table)
+    # All logic for PIE, VBC, VDBC, and LDRBRD is now removed.
     return "TBL"
 
 
 def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title: str) -> Dict[str, Any]:
+    # ... (Rest of the function remains the same, but it will only hit the TBL/CARD branches) ...
     if not data:
         return {"error": "No data to format."}
 
@@ -41,24 +37,22 @@ def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title:
     }
 
     if widget_type == "TBL" or widget_type == "LDRBRD":
-        if widget_type == "LDRBRD" and data:
-            for i, record in enumerate(data):
-                record['rank'] = f"#{i + 1}"
-
+        # The LDRBRD logic is harmless here, but if you don't want the '#rank' column,
+        # remove the 'if widget_type == "LDRBRD"' block entirely.
+        
+        # Since we only return "TBL" now, LDRBRD logic is technically dead code.
+        
         first_record = data[0]
         columns = [{"label": str(key).replace('_', ' ').title(), "key": str(key)} for key in first_record.keys()]
         
-        if widget_type == "LDRBRD":
-            rank_col = next((c for c in columns if c['key'] == 'rank'), None)
-            if rank_col:
-                columns.remove(rank_col)
-                columns.insert(0, rank_col)
+        # NOTE: The original TBL logic had conditional LDRBRD rank insertion.
+        # We remove that to simplify.
 
         return {
             **base_widget,
-            "widget_placement": 10 if widget_type == "TBL" else 9,
+            "widget_placement": 10, # Always TBL placement
             "widget_data": {"columns": columns, "records": data},
-            "widget": {"widget_slug": f"WDG_{widget_type}", "widget_title": title, "widget_typeofchart": widget_type}
+            "widget": {"widget_slug": f"WDG_TBL", "widget_title": title, "widget_typeofchart": "TBL"}
         }
 
     if widget_type == "CARD":
@@ -74,36 +68,5 @@ def format_data_into_widget(widget_type: str, data: List[Dict[str, Any]], title:
             "widget": {"widget_slug": "WDG_CARD", "widget_title": title, "widget_typeofchart": "CARD"}
         }
 
-    if widget_type in ["VBC", "VDBC", "PIE", "VSBC"]:
-        first_record = data[0]
-        label_key = list(first_record.keys())[0]
-        labels = [str(rec.get(label_key)) for rec in data]
-        
-        datasets = []
-        metric_keys = list(first_record.keys())[1:]
-        
-        colors = ["#05abf3", "#f3b4b7", "#fdbf16", "#4db3e5", "#756fd7", "#e189b5"]
-
-        if widget_type == "PIE":
-             datasets.append({
-                "label": str(metric_keys[0]).replace('_', ' ').title(),
-                "data": [rec.get(metric_keys[0]) for rec in data],
-                "backgroundColor": colors,
-             })
-        else:
-            for i, key in enumerate(metric_keys):
-                datasets.append({
-                    "label": str(key).replace('_', ' ').title(),
-                    "data": [rec.get(key) for rec in data],
-                    "backgroundColor": colors[i % len(colors)],
-                    "type": "bar"
-                })
-
-        return {
-            **base_widget, "widget_width": "50", "widget_placement": 2,
-            "widget_data": {"labels": labels, "datasets": datasets},
-            "widget": {"widget_slug": f"WDG_{widget_type}", "widget_title": title, "widget_typeofchart": widget_type}
-        }
-
-    # Fallback
+    # Fallback is now guaranteed to be TBL
     return format_data_into_widget("TBL", data, title)

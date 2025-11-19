@@ -15,7 +15,7 @@ llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=settings.OPENAI_API_KEY)
 # --- Initialize Local LLM via Ollama's OpenAI-Compatible API ---
 # llm = ChatOpenAI(
 #     # The name of the model you pulled locally
-#     model="qwen3:8b", 
+#     model="phi3:mini", 
     
 #     # Point the base URL to your local Ollama server
 #     base_url="http://localhost:11434/v1",
@@ -55,25 +55,30 @@ The DataFrame is loaded from a CSV and has the following structure and key busin
 2.  **Imports:** **DO NOT** include `import pandas as pd`. Assume the DataFrame is already loaded as `df`.
 3.  **Clarity & Structure:** Write the code clearly. You may use intermediate variables (e.g., `temp_df`) if the calculation is complex, but the final line must assign to `result`.
 4.  **Aggregation Rule (CRITICAL):**
-    * Any use of `.groupby()` **MUST** be followed by a `.reset_index()` to return a flat DataFrame.
+    * Any use of `.groupby()` **MUST** include all necessary identifying columns (`vendor_code`, `vendor_name`, time period) in the grouping list.
+    * The grouping **MUST** be followed by a `.reset_index()` to return a flat DataFrame.
+    * **DO NOT** manually add identifying columns back to the result later; group them from the start.
 5.  **Handling Edge Cases & Column Naming (CRITICAL):**
     * You **MUST** use the **lowercase snake_case column names** as listed in the schema table (e.g., **`total_disb_amount`**).
+    * **For any filtering operation that creates a subset of the DataFrame which is immediately modified (e.g., adding a new column), you MUST use the `.copy()` method to explicitly create an independent DataFrame (e.g., `new_df = df[...].copy()`) to prevent execution errors.**
+    * **When performing column-wise arithmetic (`diff`, `+`, `-`), you MUST first slice the DataFrame to include ONLY the numeric columns** (e.g., using `.iloc[:, 2:]` after pivoting) to prevent errors like `'float' and 'str'`.
     * If a required column is missing, assume the request cannot be fulfilled and set `result = pd.DataFrame('Error': ['Column(s) required for the query are missing based on the df_info.'])`.
     * For ranking or top/bottom N queries, use `.nlargest()` or `.nsmallest()` where appropriate, or a sort and slice.
 6.  **Complex Calculation Formulas (Prioritize these definitions):**
     * **Distribution/Frequency:** Use `.value_counts()` or a `groupby().size()` and then `reset_index(name='Count')`.
 7.  **Date/Time Handling (MOM/QOQ) (CRITICAL FIX):**
     * **For any calculation requiring time-based grouping, you MUST use the column 'cycle_start_date'.**
-    * **For conversion, you MUST use `pd.to_datetime(df['cycle_start_date'], format='%d/%m/%y', errors='coerce')`** to ensure robustness against mixed formats while respecting the confirmed structure.
-    * For MOM/QOQ comparison, you **MUST dynamically determine** the time periods by sorting the unique periods (e.g., `sorted(df['quarter'].unique())`) and selecting the first two for comparison, avoiding hardcoded period names (like '2023Q1').
+    * **For conversion, you MUST use `pd.to_datetime(df['cycle_start_date'], format='%d/%m/%y', errors='coerce')`** to ensure robustness against mixed formats.
+    * For MOM/QOQ analysis, you **MUST** use the Indian Financial Year quarter system by using the frequency code **`'Q-MAR'`** (e.g., `dt.to_period('Q-MAR')`). Also, **dynamically determine** the comparison periods by sorting the unique periods.
 8.  **Variance Magnitude (Highest/Biggest):**
     * For general variance, use the **absolute value** of the difference (`.abs()`) before ranking using `.nlargest(1, 'Abs Variance Column')`.
 9.  **Directional Variance (Fall/Rise):**
     * For **"sharpest fall"** (a decrease), calculate the signed difference (**Q2 - Q1**) and use **`.nsmallest(1)`**.
     * For **"sharpest rise"** (an increase), calculate the signed difference (**Q2 - Q1**) and use **`.nlargest(1)`**.
-10. **DSA/Vendor Identification (CRITICAL):** For accurate unique analysis, you MUST use the **vendor_code** for the primary aggregation key.
-11. **Final Output Presentation (CRITICAL):** The final result DataFrame MUST contain both the unique identifier (**vendor_code**) and the descriptive name (**vendor_name**). Include the amounts for the comparison periods (e.g., Q1 Amt, Q2 Amt) alongside the difference.
-12. **Serialization Fix (CRITICAL):** Any column that is a time period or datetime object MUST be converted to a standard string representation using **`.astype(str)`** before the final assignment to `result`.
+10. **DSA/Vendor Identification (CRITICAL FIX):** For accurate analysis, the primary aggregation key **MUST** include **`vendor_code` and `vendor_name`** alongside the time period.11. **Final Output Presentation (CRITICAL):** The final result DataFrame MUST contain both the unique identifier (**vendor_code**) and the descriptive name (**vendor_name**). Include the amounts for the comparison periods (e.g., Q1 Amt, Q2 Amt) alongside the difference.
+12. **Serialization Fix (CRITICAL):**
+    * Any column that is a time period or datetime object **in the rows** MUST be converted to a standard string representation using **`.astype(str)`**.
+    * **After any pivot operation, the column labels (index) that represent time periods MUST be converted to strings using `.columns.astype(str)` before the final assignment to `result` to ensure JSON compatibility.**
 
 ### Final Output Format (CRITICAL)
 
@@ -98,7 +103,7 @@ The DataFrame is loaded from a CSV and has the following structure and key busin
              # This suggests the model failed to follow the format instructions
              # You might add logic here to retry or refine the prompt with a sample JSON
              pass 
-        raise ValueError("Failed to generate pandas code from LangChain.")
+        raise ValueError("Failed to generate pandas code from LangChain: {e}")
     
     
 def generate_title(query: str) -> Dict[str, Any]:
