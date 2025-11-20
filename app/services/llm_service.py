@@ -6,16 +6,17 @@ from app.models.analytics import CodeResponse, TitleResponse, SummarySuggestions
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 logger = logging.getLogger(__name__)
 
 # Initialize the OpenAI model via LangChain
-llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=settings.OPENAI_API_KEY)
+# llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=settings.OPENAI_API_KEY)
 
 # --- Initialize Local LLM via Ollama's OpenAI-Compatible API ---
 # llm = ChatOpenAI(
 #     # The name of the model you pulled locally
-#     model="phi3:mini", 
+#     model="codellama:7b-python", 
     
 #     # Point the base URL to your local Ollama server
 #     base_url="http://localhost:11434/v1",
@@ -24,11 +25,22 @@ llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=settings.OPENAI_API_KEY)
 #     api_key="ollama" 
 # )
 
+# Initialize GenAI LLM via LangChain
+llm = ChatGoogleGenerativeAI(
+    # Use an appropriate coding/reasoning model
+    model="gemini-2.5-flash", 
+
+    # Pass the API key from your configuration
+    google_api_key=settings.GEMINI_API_KEY
+)
+
 def generate_code(query: str, df_info: str) -> Dict[str, Any]:
     parser = JsonOutputParser(pydantic_object=CodeResponse)
     prompt = PromptTemplate(
         template="""
-### DataFrame Context & Schema
+You are an **expert Python data analyst and Pandas code generation AI**. Your sole task is to generate the correct, complete, and highly optimized Python Pandas code to fulfill the user's data analysis request.
+
+###  DataFrame Context & Schema
 The DataFrame is loaded from a CSV and has the following structure and key business columns:
 
 | DataFrame Column Name | Business Meaning / Aliases (Use these for interpretation) | Data Type Hint |
@@ -49,43 +61,45 @@ The DataFrame is loaded from a CSV and has the following structure and key busin
 ### User Query
 "{query}"
 
-###  Code Generation Instructions
+###  Code Generation Instructions (CRITICAL FOR EXECUTION)
 
 1.  **Output Variable:** The final resulting DataFrame **MUST** be stored in a variable named `result`.
 2.  **Imports:** **DO NOT** include `import pandas as pd`. Assume the DataFrame is already loaded as `df`.
-3.  **Clarity & Structure:** Write the code clearly. You may use intermediate variables (e.g., `temp_df`) if the calculation is complex, but the final line must assign to `result`.
-4.  **Aggregation Rule (CRITICAL):**
+3.  **Clarity & Structure:** Write the code clearly. You may use intermediate variables (e.g., `temp_df`) if the calculation is complex.
+4.  **Aggregation Rule:**
     * Any use of `.groupby()` **MUST** include all necessary identifying columns (`vendor_code`, `vendor_name`, time period) in the grouping list.
     * The grouping **MUST** be followed by a `.reset_index()` to return a flat DataFrame.
     * **DO NOT** manually add identifying columns back to the result later; group them from the start.
-5.  **Handling Edge Cases & Column Naming (CRITICAL):**
+5.  **Handling Edge Cases & Column Naming:**
     * You **MUST** use the **lowercase snake_case column names** as listed in the schema table (e.g., **`total_disb_amount`**).
-    * **For any filtering operation that creates a subset of the DataFrame which is immediately modified (e.g., adding a new column), you MUST use the `.copy()` method to explicitly create an independent DataFrame (e.g., `new_df = df[...].copy()`) to prevent execution errors.**
-    * **When performing column-wise arithmetic (`diff`, `+`, `-`), you MUST first slice the DataFrame to include ONLY the numeric columns** (e.g., using `.iloc[:, 2:]` after pivoting) to prevent errors like `'float' and 'str'`.
-    * If a required column is missing, assume the request cannot be fulfilled and set `result = pd.DataFrame('Error': ['Column(s) required for the query are missing based on the df_info.'])`.
-    * For ranking or top/bottom N queries, use `.nlargest()` or `.nsmallest()` where appropriate, or a sort and slice.
-6.  **Complex Calculation Formulas (Prioritize these definitions):**
+    * **COPY RULE (Vital for `aeval`):** For **ANY** filtering operation that creates a subset of the DataFrame (e.g., `df[df['col'] == val]`), you **MUST** append `.copy()` to the end (e.g., `df_filtered = df[...].copy()`). This prevents the fatal `SettingWithCopyWarning`.
+    * **MATH RULE:** When performing column-wise arithmetic (`diff`, `+`, `-`), you **MUST** first slice the DataFrame to include **ONLY** the numeric columns (e.g., `result.iloc[:, 2:].diff(axis=1)`) to prevent `'float' and 'str'` type errors.
+    * If a required column is missing, set `result = pd.DataFrame({{'Error': ['Column(s) required for the query are missing based on the df_info.']}})` .
+6.  **Complex Calculation Formulas:**
     * **Distribution/Frequency:** Use `.value_counts()` or a `groupby().size()` and then `reset_index(name='Count')`.
-7.  **Date/Time Handling (MOM/QOQ) (CRITICAL FIX):**
-    * **For any calculation requiring time-based grouping, you MUST use the column 'cycle_start_date'.**
-    * **For conversion, you MUST use `pd.to_datetime(df['cycle_start_date'], format='%d/%m/%y', errors='coerce')`** to ensure robustness against mixed formats.
-    * For MOM/QOQ analysis, you **MUST** use the Indian Financial Year quarter system by using the frequency code **`'Q-MAR'`** (e.g., `dt.to_period('Q-MAR')`). Also, **dynamically determine** the comparison periods by sorting the unique periods.
+7.  **Date/Time Handling (MOM/QOQ) (CRITICAL):**
+    * **Column:** You **MUST** use the column `cycle_start_date` for time-based grouping.
+    * **Conversion:** You **MUST** perform this exact conversion at the start: 
+      `df['cycle_start_date'] = pd.to_datetime(df['cycle_start_date'], format='%d/%m/%y', errors='coerce')`
+    * **Quarters (Indian FY):** For quarterly analysis, use `dt.to_period('Q-MAR')`.
+    * **Period Arithmetic:** To shift a period (e.g., get previous month), do NOT use `.dt` on the Period object. Instead, subtract directly: `df['period'] - 1`.
+    * **Period to Timestamp:** If you need to convert a Period column back to a timestamp, use `.to_timestamp()` directly on the Series (e.g., `df['period_col'].to_timestamp()`), NOT `df['period_col'].dt.to_timestamp()`.
 8.  **Variance Magnitude (Highest/Biggest):**
-    * For general variance, use the **absolute value** of the difference (`.abs()`) before ranking using `.nlargest(1, 'Abs Variance Column')`.
+    * For general variance, use the **absolute value** of the difference (`.abs()`) before ranking.
 9.  **Directional Variance (Fall/Rise):**
-    * For **"sharpest fall"** (a decrease), calculate the signed difference (**Q2 - Q1**) and use **`.nsmallest(1)`**.
-    * For **"sharpest rise"** (an increase), calculate the signed difference (**Q2 - Q1**) and use **`.nlargest(1)`**.
-10. **DSA/Vendor Identification (CRITICAL FIX):** For accurate analysis, the primary aggregation key **MUST** include **`vendor_code` and `vendor_name`** alongside the time period.11. **Final Output Presentation (CRITICAL):** The final result DataFrame MUST contain both the unique identifier (**vendor_code**) and the descriptive name (**vendor_name**). Include the amounts for the comparison periods (e.g., Q1 Amt, Q2 Amt) alongside the difference.
+    * **Sharpest Fall:** Calculate signed difference (Current - Previous) and use `.nsmallest(1)`.
+    * **Sharpest Rise:** Calculate signed difference (Current - Previous) and use `.nlargest(1)`.
+10. **DSA/Vendor Identification:** The primary aggregation key **MUST** include `vendor_code` and `vendor_name`.
+11. **Final Output Presentation:** The final result DataFrame MUST contain the unique identifier (`vendor_code`) and descriptive name (`vendor_name`).
 12. **Serialization Fix (CRITICAL):**
-    * Any column that is a time period or datetime object **in the rows** MUST be converted to a standard string representation using **`.astype(str)`**.
-    * **After any pivot operation, the column labels (index) that represent time periods MUST be converted to strings using `.columns.astype(str)` before the final assignment to `result` to ensure JSON compatibility.**
+    * **Row Values:** Any column that is a time period or datetime object MUST be converted to string using `.astype(str)`.
+    * **Column Labels (After Pivot):** If you pivot the data, the column index (which holds the time periods) MUST be converted to strings using `result.columns = result.columns.map(str)` **BEFORE** the final assignment to `result`. Do NOT use `.astype(str)` on the columns attribute itself.
 
-### Final Output Format (CRITICAL)
+### Final Output Format
 
-**You MUST respond ONLY with a single JSON object that adheres to the following format instructions. DO NOT include any explanatory text, markdown outside the JSON block, or extra characters.**
+**You MUST respond ONLY with a single JSON object that adheres to the following format instructions. DO NOT include any explanatory text, markdown blocks (like ```python), or extra characters.**
 
 {format_instructions}
-
 """,
         input_variables=["query", "df_info"],
         partial_variables={"format_instructions": parser.get_format_instructions()},
@@ -103,7 +117,7 @@ The DataFrame is loaded from a CSV and has the following structure and key busin
              # This suggests the model failed to follow the format instructions
              # You might add logic here to retry or refine the prompt with a sample JSON
              pass 
-        raise ValueError("Failed to generate pandas code from LangChain: {e}")
+        raise ValueError(f"Failed to generate pandas code from LangChain: {e}")
     
     
 def generate_title(query: str) -> Dict[str, Any]:
